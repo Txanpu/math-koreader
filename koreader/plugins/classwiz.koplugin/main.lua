@@ -87,7 +87,7 @@ function ClassWiz:_makeSolidBar(w, h, color)
                 w = math.max(1, math.floor(w)),
                 h = math.max(1, math.floor(h)),
             }),
-            self:_makeText("", 2),
+            self:_makeText("", 10),
         }),
     })
 end
@@ -98,7 +98,7 @@ function ClassWiz:_makeSpacer(w, h)
             w = math.max(1, math.floor(w)),
             h = math.max(1, math.floor(h)),
         }),
-        self:_makeText("", 2),
+        self:_makeText("", 10),
     })
 end
 
@@ -127,7 +127,6 @@ function ClassWiz:_closeWindow(is_exiting)
     end
 end
 
--- Inserta un token de texto/operador en la posición actual del cursor
 function ClassWiz:_insertToken(text, eval_str, is_num_part)
     if self.last_val ~= nil and self.cursor_seq == self.root_seq then
         if is_num_part then
@@ -159,7 +158,6 @@ function ClassWiz:_insertToken(text, eval_str, is_num_part)
     self:show()
 end
 
--- Inserta una fracción 2D (si hay dígitos justo antes del cursor, los sube al numerador)
 function ClassWiz:_insertFraction()
     self.last_val = nil
     self.error_msg = nil
@@ -255,7 +253,6 @@ function ClassWiz:_findNodeIndex(seq, target_node)
     return 0
 end
 
--- Navegación por cursores 2D (Izquierda, Derecha, Arriba, Abajo)
 function ClassWiz:_moveLeft()
     if self.cursor_pos > 0 then
         local item = self.cursor_seq.items[self.cursor_pos]
@@ -384,7 +381,6 @@ function ClassWiz:_deleteBack()
     self:show()
 end
 
--- Convierte un árbol 2D en expresión matemática evaluable en Lua
 function ClassWiz:_seqToLua(seq)
     if #seq.items == 0 then
         return "0"
@@ -393,11 +389,16 @@ function ClassWiz:_seqToLua(seq)
     for i, item in ipairs(seq.items) do
         local prev = seq.items[i - 1]
         if prev then
-            local prev_is_val = (prev.kind == "frac" or prev.kind == "sqrt" or prev.kind == "pow")
-                or (prev.kind == "tok" and (prev.is_num or prev.text == "))")
-            local cur_needs_mul = (item.kind == "frac" or item.kind == "sqrt")
-                or (item.kind == "tok" and (item.text == "(" or item.text == "π" or item.text == "e"
-                    or string.find(item.text, "^a?s?e?n?c?o?s?t?a?n?l?o?g?l?n?%(")))
+            local prev_is_end_paren = (prev.kind == "tok") and (prev.text == ")")
+            local prev_is_num_tok = (prev.kind == "tok") and (prev.is_num or prev_is_end_paren)
+            local prev_is_val = (prev.kind == "frac" or prev.kind == "sqrt" or prev.kind == "pow" or prev_is_num_tok)
+
+            local cur_is_func = (item.kind == "tok") and (
+                item.text == "(" or item.text == "π" or item.text == "e"
+                or string.find(item.text, "%($") ~= nil
+            )
+            local cur_needs_mul = (item.kind == "frac" or item.kind == "sqrt" or cur_is_func)
+
             if prev_is_val and cur_needs_mul then
                 table.insert(parts, "*")
             end
@@ -444,9 +445,13 @@ function ClassWiz:_evalLuaString(expr_str)
         LN = math.log,
     }
 
-    local chunk, err = load("return " .. expr_str, "calc", "t", env)
+    local loader = loadstring or load
+    local chunk = loader("return " .. expr_str)
     if not chunk then
         return nil
+    end
+    if setfenv then
+        setfenv(chunk, env)
     end
     local ok, res = pcall(chunk)
     if not ok or type(res) ~= "number" or res ~= res or math.abs(res) == math.huge then
@@ -455,7 +460,6 @@ function ClassWiz:_evalLuaString(expr_str)
     return res
 end
 
--- Convierte un decimal en fracción exacta p/q mediante fracciones continuas
 function ClassWiz:_toExactFraction(val)
     local sign = val < 0 and -1 or 1
     local x = math.abs(val)
@@ -488,7 +492,6 @@ function ClassWiz:_toExactFraction(val)
     return nil, nil
 end
 
--- Extrae dividendo y divisor si la operación principal es una fracción o división
 function ClassWiz:_extractDivisionPair()
     if #self.root_seq.items == 1 and self.root_seq.items[1].kind == "frac" then
         local f = self.root_seq.items[1]
@@ -557,15 +560,14 @@ function ClassWiz:_toggleSD()
     self:show()
 end
 
--- Renderizador recursivo 2D de expresiones matemáticas
 function ClassWiz:_renderSeq(seq, depth)
     local font_sz = (depth == 0) and 22 or ((depth == 1) and 17 or 14)
 
     if #seq.items == 0 then
         local is_active = (self.cursor_seq == seq)
         return FrameContainer:new({
-            background = is_active and Blitbuffer.COLOR_BLACK or Blitbuffer.COLOR_WHITE,
-            bordersize = is_active and 2 or 1,
+            background = Blitbuffer.COLOR_WHITE,
+            bordersize = is_active and 3 or 1,
             padding = 2,
             margin = 2,
             self:_makeText(is_active and "▪" or "▢", font_sz - 2),
@@ -644,7 +646,6 @@ function ClassWiz:_renderSeq(seq, depth)
     return row
 end
 
--- Construye el gráfico de Zatiketa en Caja de Papel (Dividendo | Divisor)
 function ClassWiz:_buildPaperDivisionWidget(D, d)
     local q = math.floor(D / d)
     local rem_final = D % d
@@ -680,7 +681,6 @@ function ClassWiz:_buildPaperDivisionWidget(D, d)
     local quo_sz = quo_text:getSize()
     local box_w = math.max(div_sz.w, quo_sz.w, 36) + 8
 
-    -- Caja gráfica |___ con el divisor arriba y el cociente debajo
     local divisor_with_wall = HorizontalGroup:new({
         align = "center",
         self:_makeSolidBar(2, div_sz.h + 4, Blitbuffer.COLOR_BLACK),
@@ -704,7 +704,6 @@ function ClassWiz:_buildPaperDivisionWidget(D, d)
     })
 end
 
--- Construye el widget de descomposición en factores primos 2D (FACT)
 function ClassWiz:_buildPrimeFactorsWidget(n)
     local num = math.floor(math.abs(n) + 0.5)
     if num < 2 or num > 999999999 then
@@ -748,7 +747,6 @@ function ClassWiz:_buildPrimeFactorsWidget(n)
     return row
 end
 
--- Construye el widget de resultado en la esquina inferior derecha del LCD
 function ClassWiz:_buildResultWidget()
     if self.error_msg then
         return self:_makeText(self.error_msg, 22)
@@ -822,7 +820,6 @@ function ClassWiz:show()
     local w_6 = math.floor((panel_w - 24) / 6)
     local w_5 = math.floor((panel_w - 20) / 5)
 
-    -- 1. Cabecera estilo Casio fx-570SP X II Iberia ClassWiz
     local header_row = HorizontalGroup:new({
         align = "center",
         self:_makeText(_("CASIO   fx-570SP X II Iberia   [CLASSWIZ]"), 17),
@@ -832,7 +829,6 @@ function ClassWiz:show()
         end, math.floor(panel_w * 0.20), math.max(34, math.floor(nav_h * 0.8)), 2),
     })
 
-    -- 2. Pantalla LCD Gráfica 2D (tamaño fijo para que nunca mueva los botones)
     local status_str = string.format(
         "[D]  [Math ▲▼]  %s  %s",
         self.shift and "[SHIFT]" or "[Natural-V.P.A.M.]",
@@ -861,10 +857,9 @@ function ClassWiz:show()
         }),
     })
 
-    -- 3. Fila de Cursores 2D (◀ ▲ ▼ ▶) + SHIFT + Zatiketa en Caja (÷R)
     local nav_row = HorizontalGroup:new({
         align = "center",
-        self:_makeButton(self.shift and _("��SHIFT•") or _("SHIFT"), function()
+        self:_makeButton(self.shift and _("[SHIFT]") or _("SHIFT"), function()
             self.shift = not self.shift
             self:show()
         end, w_6, nav_h, self.shift and 4 or 2),
@@ -877,7 +872,6 @@ function ClassWiz:show()
         end, w_6, nav_h, 3),
     })
 
-    -- 4. Bloque Científico (3 filas x 6 columnas idénticas a la Casio ClassWiz)
     local sci_row1 = HorizontalGroup:new({
         align = "center",
         self:_makeButton(_("▢/▢"), function() self:_insertFraction() end, w_6, sci_h, 3),
@@ -942,7 +936,6 @@ function ClassWiz:show()
         end, w_6, sci_h, 2),
     })
 
-    -- 5. Teclado Numérico Principal (4 filas x 5 columnas igual que la Casio)
     local num_row1 = HorizontalGroup:new({
         align = "center",
         self:_makeButton(_("7"), function() self:_insertToken("7", "7", true) end, w_5, num_h, 2),
